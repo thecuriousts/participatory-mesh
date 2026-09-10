@@ -1,0 +1,175 @@
+#!/usr/bin/env bash
+# On-prem operator CLI. Talks to mesh nodes over Tailscale HTTP.
+# Not SSH. Not a chat client. Agents get this, not a shell.
+set -euo pipefail
+
+PORT="${MESH_WEB_PORT:-47989}"
+CONFIG_DIR="${MESH_CONFIG_DIR:-${HOME}/.config/mesh}"
+TOKEN_FILE="${CONFIG_DIR}/token"
+NODES_FILE="${CONFIG_DIR}/nodes"
+COOKIE_FILE="${CONFIG_DIR}/cookie"
+SERVICES_FILE="${CONFIG_DIR}/allowed_services"
+
+usage() {
+  cat <<'EOF'
+mesh — gate CLI (your machines, allowlisted commands, no SSH)
+
+  mesh init                 write token, cookie, nodes (once; copy to the other laptop)
+  mesh status               GET /health on every node
+  mesh cmd <command>        POST /command (Bearer token)
+  mesh cmd <command> --node <ip>
+
+Commands the kernel allows: health_check, tailscale_status, help,
+restart_service (only names in ~/.config/mesh/allowed_services).
+shell is always 403.
+
+Env: MESH_API_TOKEN, MESH_NODES (comma IPs), MESH_WEB_PORT, MESH_CONFIG_DIR
+EOF
+}
+
+token() {
+  if [[ -n "${MESH_API_TOKEN:-}" ]]; then
+    printf '%s' "$MESH_API_TOKEN"
+    return
+  fi
+  if [[ -f "$TOKEN_FILE" ]]; then
+    tr -d '\n' < "$TOKEN_FILE"
+    return
+  fi
+  echo "no token: run mesh init or set MESH_API_TOKEN" >&2
+  exit 1
+}
+
+nodes() {
+  if [[ -n "${MESH_NODES:-}" ]]; then
+    echo "$MESH_NODES" | tr ', ' '\n' | grep -v '^$'
+    return
+  fi
+  if [[ -f "$NODES_FILE" ]]; then
+    grep -v '^#' "$NODES_FILE" | grep -v '^$'
+    return
+  fi
+  tailscale ip -4 2>/dev/null || echo 127.0.0.1
+}
+
+cmd_init() {
+  mkdir -p "$CONFIG_DIR"
+  chmod 700 "$CONFIG_DIR"
+  umask 077
+  if [[ ! -f "$TOKEN_FILE" ]]; then
+    openssl rand -hex 32 > "$TOKEN_FILE"
+    echo "wrote $TOKEN_FILE"
+  else
+    echo "kept $TOKEN_FILE"
+  fi
+  chmod 600 "$TOKEN_FILE"
+  if [[ ! -f "$COOKIE_FILE" ]]; then
+    openssl rand -hex 16 > "$COOKIE_FILE"
+    echo "wrote $COOKIE_FILE"
+  else
+    echo "kept $COOKIE_FILE"
+  fi
+  chmod 600 "$COOKIE_FILE"
+  if [[ ! -f "$SERVICES_FILE" ]]; then
+    printf '# one systemd unit name per line\n# mesh\n' > "$SERVICES_FILE"
+    echo "wrote $SERVICES_FILE (empty allowlist — restart_service denied)"
+  fi
+  {
+    tailscale ip -4 2>/dev/null || true
+    if command -v tailscale >/dev/null 2>&1; then
+      tailscale status --json 2>/dev/null | python3 -c '
+import json,sys
+d=json.load(sys.stdin)
+for p in d.get("Peer",{}).values():
+    ips=p.get("TailscaleIPs") or []
+    if p.get("Online") and ips:
+        print(ips[0])
+' 2>/dev/null || true
+    fi
+  } | awk 'NF && !seen[$0]++' > "$NODES_FILE"
+  echo "wrote $NODES_FILE"
+  echo
+  echo "Copy $CONFIG_DIR/{token,cookie,nodes,allowed_services} to the other laptop (same bytes)."
+  echo "If :47989 is already something else there (Sunshine uses it), start mesh with MESH_WEB_PORT=18789"
+  echo "and put '100.x.x.x 18789' in $NODES_FILE."
+  echo "Restart mesh with: export MESH_COOKIE=\$(cat $COOKIE_FILE)"
+  echo "                   export MESH_API_TOKEN=\$(cat $TOKEN_FILE)"
+  echo "Then:  $(dirname "$0")/mesh status"
+}
+
+# line is "ip" or "ip port"
+host_port() {
+  set -- $1
+  printf '%s %s' "$1" "${2:-$PORT}"
+}
+
+cmd_status() {
+  local line ip p body code
+  while read -r line; do
+    [[ -z "$line" ]] && continue
+    read -r ip p <<< "$(host_port "$line")"
+    body="$(curl -sS -m 3 -w '\n%{http_code}' "http://${ip}:${p}/health" 2>/dev/null || true)"
+    code="$(printf '%s' "$body" | tail -n1)"
+    body="$(printf '%s' "$body" | sed '$d')"
+    if printf '%s' "$body" | grep -q '"quorum"'; then
+      echo "$ip:$p  mesh  $code  $body"
+    elif [[ -z "$code" || "$code" == "000" ]]; then
+      echo "$ip:$p  down"
+    else
+      echo "$ip:$p  other  http=$code  (not mesh — use MESH_WEB_PORT on that host; nodes file: ip port)"
+    fi
+  done < <(nodes)
+}
+
+cmd_cmd() {
+  local command="$1"
+  shift || true
+  local node="" args="{}"
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --node) node="$2"; shift 2 ;;
+      --args) args="$2"; shift 2 ;;
+      *) echo "unknown flag $1" >&2; exit 1 ;;
+    esac
+  done
+  local tok ips
+  tok="$(token)"
+  if [[ -n "$node" ]]; then
+    ips="$node"
+  else
+    ips="$(nodes)"
+  fi
+  local line ip p
+  while read -r line; do
+    [[ -z "$line" ]] && continue
+    read -r ip p <<< "$(host_port "$line")"
+    echo "== $ip:$p =="
+    curl -sS -m 8 -w '\nhttp %{http_code}\n' \
+      -X POST "http://${ip}:${p}/command" \
+      -H 'content-type: application/json' \
+      -H "authorization: Bearer ${tok}" \
+      -d "$(python3 -c "import json; print(json.dumps({'command':'''$command''','args':json.loads('''$args''')}))" 2>/dev/null || echo "{\"command\":\"$command\"}")"
+  done <<< "$ips"
+}
+
+main() {
+  case "${1:-}" in
+    ""|-h|--help|help) usage ;;
+    init) cmd_init ;;
+    status) cmd_status ;;
+    cmd)
+      shift
+      if [[ $# -lt 1 ]]; then
+        echo "mesh cmd <command>" >&2
+        exit 1
+      fi
+      cmd_cmd "$@"
+      ;;
+    *)
+      usage >&2
+      exit 1
+      ;;
+  esac
+}
+
+main "$@"

@@ -1,0 +1,321 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Mesh Cluster Dashboard</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #1a1a2e; color: #eee; line-height: 1.6; }
+    .container { max-width: 1400px; margin: 0 auto; padding: 20px; }
+    header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 30px; padding-bottom: 20px; border-bottom: 1px solid #333; }
+    h1 { font-size: 1.8rem; font-weight: 600; }
+    .status-badge { padding: 6px 12px; border-radius: 20px; font-size: 0.85rem; font-weight: 600; }
+    .status-healthy { background: #0f3460; color: #00d9a5; }
+    .status-degraded { background: #3d2a0f; color: #ffd60a; }
+    .status-critical { background: #4a0f0f; color: #ff4757; }
+    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(350px, 1fr)); gap: 20px; }
+    .card { background: #16213e; border-radius: 12px; padding: 20px; border: 1px solid #0f3460; }
+    .card h2 { font-size: 1.1rem; margin-bottom: 16px; color: #00d9a5; display: flex; align-items: center; gap: 8px; }
+    .card h2::before { content: ''; width: 8px; height: 8px; background: #00d9a5; border-radius: 50%; }
+    .peer { display: flex; justify-content: space-between; align-items: center; padding: 12px 0; border-bottom: 1px solid #2a2a4a; }
+    .peer:last-child { border-bottom: none; }
+    .peer-info { display: flex; flex-direction: column; gap: 4px; }
+    .peer-name { font-weight: 500; }
+    .peer-ip { font-size: 0.8rem; color: #888; font-family: monospace; }
+    .peer-status { display: flex; align-items: center; gap: 8px; }
+    .status-dot { width: 10px; height: 10px; border-radius: 50%; }
+    .status-dot.online { background: #00d9a5; box-shadow: 0 0 8px #00d9a5; }
+    .status-dot.offline { background: #ff4757; }
+    .service { display: flex; justify-content: space-between; padding: 10px 0; border-bottom: 1px solid #2a2a4a; }
+    .service:last-child { border-bottom: none; }
+    .service-name { text-transform: capitalize; }
+    .service-meta { display: flex; align-items: center; gap: 12px; font-size: 0.85rem; color: #888; }
+    .folder { padding: 12px 0; border-bottom: 1px solid #2a2a4a; }
+    .folder:last-child { border-bottom: none; }
+    .folder-header { display: flex; justify-content: space-between; margin-bottom: 8px; }
+    .folder-name { font-weight: 500; }
+    .folder-progress { font-size: 0.85rem; color: #00d9a5; }
+    .folder-stats { display: flex; gap: 16px; font-size: 0.8rem; color: #888; }
+    .conflict { background: #3d1a1a; border: 1px solid #ff4757; border-radius: 8px; padding: 16px; margin-bottom: 12px; }
+    .conflict-header { display: flex; justify-content: space-between; margin-bottom: 8px; }
+    .conflict-file { font-family: monospace; font-size: 0.9rem; }
+    .conflict-meta { display: flex; gap: 16px; font-size: 0.8rem; color: #aaa; }
+    .conflict-actions { display: flex; gap: 8px; margin-top: 12px; }
+    .btn { padding: 8px 16px; border: none; border-radius: 6px; font-size: 0.85rem; font-weight: 500; cursor: pointer; transition: all 0.2s; }
+    .btn-primary { background: #0f3460; color: #00d9a5; }
+    .btn-primary:hover { background: #1a4a80; }
+    .btn-danger { background: #4a0f0f; color: #ff4757; }
+    .btn-danger:hover { background: #6b1414; }
+    .command-form { display: flex; gap: 10px; margin-top: 20px; flex-wrap: wrap; }
+    .command-form input, .command-form select { padding: 10px 12px; border: 1px solid #0f3460; background: #1a1a2e; color: #eee; border-radius: 6px; }
+    .command-form input[type="text"] { flex: 1; min-width: 200px; }
+    .result { background: #0f0f1a; border-radius: 8px; padding: 16px; margin-top: 20px; font-family: monospace; font-size: 0.8rem; max-height: 300px; overflow: auto; white-space: pre-wrap; }
+    .loading { opacity: 0.6; pointer-events: none; }
+    .refresh-btn { background: #0f3460; color: #00d9a5; border: none; padding: 8px 16px; border-radius: 6px; cursor: pointer; }
+    .refresh-btn:hover { background: #1a4a80; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <header>
+      <h1>🕸️ Mesh Cluster Dashboard</h1>
+      <div>
+        <span id="cluster-status" class="status-badge status-healthy">Loading...</span>
+        <button class="refresh-btn" onclick="loadAll()">⟳ Refresh</button>
+      </div>
+    </header>
+
+    <div class="grid">
+      <!-- Cluster Health -->
+      <div class="card">
+        <h2>Cluster Health</h2>
+        <div id="peers">Loading...</div>
+      </div>
+
+      <!-- Services -->
+      <div class="card">
+        <h2>Services</h2>
+        <div id="services">Loading...</div>
+      </div>
+
+      <!-- Syncthing Folders -->
+      <div class="card">
+        <h2>Syncthing Folders</h2>
+        <div id="folders">Loading...</div>
+      </div>
+
+      <!-- Conflicts -->
+      <div class="card">
+        <h2>Conflicts</h2>
+        <div id="conflicts">Loading...</div>
+      </div>
+
+      <!-- Command Fabric -->
+      <div class="card" style="grid-column: 1 / -1;">
+        <h2>Command Fabric</h2>
+        <form class="command-form" id="command-form">
+          <select id="cmd-target">
+            <option value="">All nodes (broadcast)</option>
+          </select>
+          <select id="cmd-name">
+            <option value="health_check">Health Check</option>
+            <option value="syncthing_status">Syncthing Status</option>
+            <option value="sunshine_status">Sunshine Status</option>
+            <option value="tailscale_status">Tailscale Status</option>
+            <option value="pull_git">Pull Git (dotfiles)</option>
+            <option value="help">List Commands</option>
+          </select>
+          <input type="text" id="cmd-args" placeholder='JSON args: {"repo": "~/dotfiles", "branch": "main"}' style="flex: 1;">
+          <button type="submit" class="btn btn-primary">Execute</button>
+        </form>
+        <div id="cmd-result" class="result" style="display:none;"></div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const API = '';
+    
+    async function fetchJSON(path) {
+      const res = await fetch(API + path);
+      return res.json();
+    }
+
+    function renderPeers(peers) {
+      const container = document.getElementById('peers');
+      const targetSelect = document.getElementById('cmd-target');
+      
+      if (!peers || peers.length === 0) {
+        container.innerHTML = '<p style="color:#888;">No peers found</p>';
+        return;
+      }
+
+      container.innerHTML = peers.map(p => `
+        <div class="peer">
+          <div class="peer-info">
+            <span class="peer-name">${p.name || 'unknown'}</span>
+            <span class="peer-ip">${p.ip}</span>
+          </div>
+          <div class="peer-status">
+            <span class="status-dot ${p.online ? 'online' : 'offline'}"></span>
+            <span>${p.online ? 'Online' : 'Offline'}</span>
+          </div>
+        </div>
+      `).join('');
+
+      // Update target select
+      const current = targetSelect.value;
+      targetSelect.innerHTML = '<option value="">All nodes (broadcast)</option>' +
+        peers.filter(p => p.online).map(p => 
+          `<option value="${p.ip}">${p.name} (${p.ip})</option>`
+        ).join('');
+      targetSelect.value = current;
+    }
+
+    function renderServices(services) {
+      const container = document.getElementById('services');
+      if (!services) return;
+      
+      let html = '';
+      for (const [node, svcs] of Object.entries(services)) {
+        html += `<div style="margin-bottom:12px;"><strong>${node}</strong></div>`;
+        for (const [name, meta] of svcs) {
+          const healthClass = meta.health === 'healthy' ? 'online' : 'offline';
+          html += `
+            <div class="service">
+              <span class="service-name">${name}</span>
+              <div class="service-meta">
+                <span class="status-dot ${healthClass}"></span>
+                <span>${meta.health || 'unknown'}</span>
+                <span>port: ${meta.port || 'N/A'}</span>
+              </div>
+            </div>
+          `;
+        }
+      }
+      container.innerHTML = html || '<p style="color:#888;">No services</p>';
+    }
+
+    function renderFolders(folders) {
+      const container = document.getElementById('folders');
+      if (!folders || folders.length === 0) {
+        container.innerHTML = '<p style="color:#888;">No folders</p>';
+        return;
+      }
+      
+      container.innerHTML = folders.map(f => {
+        if (f.error) return `<div class="folder"><div class="folder-name">${f.id}</div><div style="color:#ff4757;">${f.error}</div></div>`;
+        const status = f.status || {};
+        return `
+          <div class="folder">
+            <div class="folder-header">
+              <span class="folder-name">${f.id}</span>
+              <span class="folder-progress">${status.needBytes ? formatBytes(status.needBytes) + ' remaining' : 'Up to date'}</span>
+            </div>
+            <div class="folder-stats">
+              <span>Files: ${status.numFiles || 0}</span>
+              <span>Size: ${status.totalSize ? formatBytes(status.totalSize) : 'N/A'}</span>
+              <span>State: ${status.state || 'unknown'}</span>
+            </div>
+          </div>
+        `;
+      }).join('');
+    }
+
+    function renderConflicts(conflicts) {
+      const container = document.getElementById('conflicts');
+      if (!conflicts || conflicts.length === 0) {
+        container.innerHTML = '<p style="color:#888;">No conflicts</p>';
+        return;
+      }
+      
+      container.innerHTML = conflicts.map(c => `
+        <div class="conflict">
+          <div class="conflict-header">
+            <span class="conflict-file">${c.file}</span>
+            <span>Folder: ${c.folder}</span>
+          </div>
+          <div class="conflict-meta">
+            <span>Local: ${new Date(c.local_mtime).toLocaleString()} (${formatBytes(c.local_size)})</span>
+            <span>Remote: ${new Date(c.remote_mtime).toLocaleString()} (${formatBytes(c.remote_size)})</span>
+          </div>
+          <div class="conflict-actions">
+            <button class="btn btn-primary" onclick="resolveConflict('${c.id}', 'local_wins')">Keep Local</button>
+            <button class="btn btn-primary" onclick="resolveConflict('${c.id}', 'remote_wins')">Keep Remote</button>
+            <button class="btn btn-primary" onclick="resolveConflict('${c.id}', 'newest')">Keep Newest</button>
+          </div>
+        </div>
+      `).join('');
+    }
+
+    function formatBytes(bytes) {
+      if (!bytes) return '0 B';
+      const k = 1024;
+      const sizes = ['B', 'KB', 'MB', 'GB'];
+      const i = Math.floor(Math.log(bytes) / Math.log(k));
+      return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
+    }
+
+    async function loadAll() {
+      try {
+        const [health, peers, services, folders, conflicts] = await Promise.all([
+          fetchJSON('/health'),
+          fetchJSON('/peers'),
+          fetchJSON('/services'),
+          fetchJSON('/folders'),
+          fetchJSON('/conflicts')
+        ]);
+
+        // Update cluster status badge
+        const badge = document.getElementById('cluster-status');
+        const quorum = health.quorum?.has_quorum ? 'healthy' : 'degraded';
+        const splitBrain = health.split_brain ? 'critical' : quorum;
+        badge.className = `status-badge status-${splitBrain}`;
+        badge.textContent = health.split_brain ? 'SPLIT BRAIN' : (quorum === 'healthy' ? 'HEALTHY' : 'DEGRADED');
+
+        renderPeers(peers.peers);
+        renderServices(services.services);
+        renderFolders(folders.folders);
+        renderConflicts(conflicts.conflicts);
+      } catch (e) {
+        console.error('Load failed:', e);
+      }
+    }
+
+    async function resolveConflict(id, strategy) {
+      try {
+        await fetch('/command', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({
+            command: 'resolve_conflict',
+            args: [{conflict_id: id, strategy}]
+          })
+        });
+        loadAll();
+      } catch (e) {
+        alert('Failed: ' + e.message);
+      }
+    }
+
+    document.getElementById('command-form').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const resultDiv = document.getElementById('cmd-result');
+      resultDiv.style.display = 'block';
+      resultDiv.textContent = 'Executing...';
+      
+      try {
+        const target = document.getElementById('cmd-target').value || null;
+        const command = document.getElementById('cmd-name').value;
+        let args = [];
+        try {
+          args = JSON.parse(document.getElementById('cmd-args').value || '[]');
+        } catch {
+          args = [];
+        }
+        
+        const res = await fetch('/command', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({command, args, target})
+        });
+        
+        const data = await res.json();
+        resultDiv.textContent = JSON.stringify(data, null, 2);
+        
+        // Refresh if it was a state-changing command
+        if (!['health_check', 'syncthing_status', 'sunshine_status', 'tailscale_status', 'help'].includes(command)) {
+          setTimeout(loadAll, 1000);
+        }
+      } catch (e) {
+        resultDiv.textContent = 'Error: ' + e.message;
+      }
+    });
+
+    // Initial load and auto-refresh
+    loadAll();
+    setInterval(loadAll, 15000);
+  </script>
+</body>
+</html>

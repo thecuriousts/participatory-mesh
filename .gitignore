@@ -1,0 +1,48 @@
+# Build artifacts
+_build/
+deps/
+*.ez
+
+# Release
+_rel/
+*.tar.gz
+
+# Mnesia data
+data/
+mnesia/
+*.DCD
+*.DCL
+*.DAT
+
+# Logs
+logs/
+*.log
+erl_crash.dump
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Local config
+config/*.secret.exs
+.env
+.env.local
+.env.lab
+.env.lab.local
+
+# Erlang/Elixir
+.elixir_ls/
+.erlang.cookie
+*.beam
+cover/
+.coverdata
+
+# Test artifacts
+*.coverdata
+.cover/
