@@ -1,0 +1,11 @@
+## Personal / two-node path: plain TCP distribution. TLS is a later SN.
+-name <%= @release.name %>
+-setcookie <%= @release.cookie %>
+-proto_dist inet_tcp
+
+-kernel inet_dist_listen_min 9000
+-kernel inet_dist_listen_max 9010
+
++sbtu
++sbwt none
++swt very_low

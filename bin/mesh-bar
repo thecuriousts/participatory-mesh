@@ -1,0 +1,208 @@
+#!/usr/bin/env bash
+# Omarchy / quickshell — mesh node status for the bar + panel plugin.
+# status → {"text","tooltip","class"}  (legacy command module)
+# panel  → rich JSON for omarchy-plugin/Panel.qml
+# allow  → desktop notify of daily hard-allow (no mix/mise — bar PATH is thin)
+# Host labels in public docs: laptop-1 / laptop-2 — never personal machine nicknames.
+set -euo pipefail
+
+PORT="${MESH_WEB_PORT:-47989}"
+HOST="${MESH_BAR_HOST:-127.0.0.1}"
+TIMEOUT="${MESH_BAR_TIMEOUT:-2}"
+
+cmd="${1:-}"
+
+ALLOW_VERBS="health_check help tailscale_status restart_service syncthing_status ensembly_status ensembly_channel_ir"
+DENIED_VERBS="shell pull_git deploy sunshine_status trigger_syncthing_scan"
+
+notify() {
+  local title="$1" body="$2"
+  # Omarchy/quickshell PATH can break notify-send (missing lib); never abort the bar action.
+  if command -v notify-send >/dev/null 2>&1; then
+    notify-send -a mesh "$title" "$body" >/dev/null 2>&1 || true
+  fi
+  # Always mirror to stderr so journal/omarchy logs keep a trail.
+  printf '%s: %s\n' "$title" "$body" >&2 || true
+}
+
+health_json() {
+  curl -fsS -m "$TIMEOUT" "http://${HOST}:${PORT}/health" 2>/dev/null || true
+}
+
+hard_allow_summary() {
+  # Pure bash/python — never call mesh CLI / mix / mise (bar env has no elixir toolchain).
+  local state_file="${MESH_HARD_ALLOW_STATE:-${MESH_GATE_STATE:-$HOME/.local/share/mesh/hard_allow.json}}"
+  python3 - "$ALLOW_VERBS" "$DENIED_VERBS" "$state_file" <<'PY'
+import json, os, sys
+allow, denied, state_file = sys.argv[1], sys.argv[2], sys.argv[3]
+lines = [
+    "hard-allow ON (no permanent off)",
+    "allow: " + allow.replace(" ", ", "),
+    "deny:  " + denied.replace(" ", ", "),
+]
+bypass = None
+try:
+    with open(state_file, "r", encoding="utf-8") as f:
+        data = json.load(f)
+    bypass = data.get("bypass") or data.get("operator_bypass")
+except FileNotFoundError:
+    lines.append("bypass: none (no state file)")
+except Exception as e:
+    lines.append(f"bypass: unreadable ({e})")
+else:
+    if not bypass:
+        lines.append("bypass: none")
+    elif isinstance(bypass, dict):
+        verbs = bypass.get("verbs") or bypass.get("commands") or []
+        hosts = bypass.get("hosts") or []
+        reason = bypass.get("reason") or ""
+        until = bypass.get("until") or bypass.get("expires_at") or bypass.get("ttl") or ""
+        lines.append(
+            "bypass: active"
+            + (f" until {until}" if until else "")
+            + (f" verbs={','.join(map(str, verbs))}" if verbs else "")
+            + (f" hosts={','.join(map(str, hosts))}" if hosts else "")
+            + (f" ({reason})" if reason else "")
+        )
+    else:
+        lines.append(f"bypass: {bypass}")
+lines.append("operator bypass: MESH_OPERATOR=1 mesh allow bypass --for 30m")
+print("\n".join(lines))
+PY
+}
+
+case "$cmd" in
+  ""|status)
+    body="$(health_json)"
+    if [[ -z "$body" ]]; then
+      printf '%s\n' '{"text":"mesh ✕","tooltip":"mesh down — nothing on :'"$PORT"'\\nStart: cd ~/dev/products/mesh && MIX_ENV=dev mix run --no-halt\\nOr: mesh-bar notify","class":"down"}'
+      exit 0
+    fi
+    python3 - "$body" "$PORT" <<'PY'
+import json, sys
+raw, port = sys.argv[1], sys.argv[2]
+try:
+    d = json.loads(raw)
+except Exception:
+    print(json.dumps({"text": "mesh ?", "tooltip": f"bad /health on :{port}", "class": "degraded"}))
+    raise SystemExit(0)
+up = int(d.get("quorum", {}).get("up") or 0)
+total = int(d.get("quorum", {}).get("total") or 0)
+has_q = bool(d.get("quorum", {}).get("has_quorum"))
+split = bool(d.get("split_brain"))
+self_n = d.get("self") or "?"
+peers = d.get("peers") or {}
+down = d.get("down") or []
+lines = [
+    f"mesh CommandFabric  :{port}",
+    f"self: {self_n}",
+    f"quorum: {up}/{total}  has_quorum={has_q}",
+    f"split_brain={split}",
+]
+if peers:
+    lines.append("peers: " + ", ".join(f"{k}={v.get('status','?')}" for k, v in peers.items()))
+if down:
+    lines.append("down: " + ", ".join(map(str, down)))
+lines.append("click: open panel · right: hard-allow notify · middle: refresh")
+if split or not has_q:
+    klass, text = "degraded", "mesh !"
+elif up >= 1:
+    klass, text = "up", "mesh"
+else:
+    klass, text = "down", "mesh ✕"
+print(json.dumps({"text": text, "tooltip": "\n".join(lines), "class": klass, "alt": klass}))
+PY
+    ;;
+  panel)
+    body="$(health_json)"
+    python3 - "$body" "$PORT" <<'PY'
+import json, sys
+raw, port = sys.argv[1], sys.argv[2]
+ALLOW = [
+    "health_check", "help", "tailscale_status", "restart_service",
+    "syncthing_status", "ensembly_status", "ensembly_channel_ir",
+]
+DENIED = [
+    "shell", "pull_git", "deploy", "sunshine_status", "trigger_syncthing_scan",
+]
+if not raw:
+    print(json.dumps({
+        "state": "down",
+        "port": int(port),
+        "self": "",
+        "quorum_up": 0,
+        "quorum_total": 0,
+        "has_quorum": False,
+        "split_brain": False,
+        "peers": [],
+        "down": [],
+        "allowlisted": ALLOW,
+        "denied": DENIED,
+    }))
+    raise SystemExit(0)
+try:
+    d = json.loads(raw)
+except Exception:
+    print(json.dumps({
+        "state": "degraded",
+        "port": int(port),
+        "self": "",
+        "quorum_up": 0,
+        "quorum_total": 0,
+        "has_quorum": False,
+        "split_brain": False,
+        "peers": [],
+        "down": [],
+        "allowlisted": ALLOW,
+        "denied": DENIED,
+    }))
+    raise SystemExit(0)
+q = d.get("quorum") or {}
+up = int(q.get("up") or 0)
+total = int(q.get("total") or 0)
+has_q = bool(q.get("has_quorum"))
+split = bool(d.get("split_brain"))
+peers = []
+for name, meta in (d.get("peers") or {}).items():
+    peers.append({
+        "name": name,
+        "status": (meta or {}).get("status", "?"),
+        "lastSeen": (meta or {}).get("last_seen", ""),
+    })
+if split or not has_q:
+    state = "degraded"
+elif up >= 1:
+    state = "up"
+else:
+    state = "down"
+print(json.dumps({
+    "state": state,
+    "port": int(port),
+    "self": d.get("self") or "",
+    "quorum_up": up,
+    "quorum_total": total,
+    "has_quorum": has_q,
+    "split_brain": split,
+    "peers": peers,
+    "down": d.get("down") or [],
+    "allowlisted": ALLOW,
+    "denied": DENIED,
+}))
+PY
+    ;;
+  notify)
+    body="$(health_json)"
+    if [[ -z "$body" ]]; then
+      notify "mesh" "down — nothing listening on :${PORT}"
+    else
+      notify "mesh" "$(python3 -c "import json,sys; d=json.loads(sys.argv[1]); q=d.get('quorum',{}); print(f\"up {q.get('up')}/{q.get('total')}  quorum={q.get('has_quorum')}  split={d.get('split_brain')}\")" "$body")"
+    fi
+    ;;
+  allow)
+    notify "mesh allow" "$(hard_allow_summary)"
+    ;;
+  *)
+    echo "usage: mesh-bar [status|panel|notify|allow]" >&2
+    exit 1
+    ;;
+esac

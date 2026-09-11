@@ -1,0 +1,33 @@
+[Unit]
+Description=Mesh Coordination Cluster
+After=network-online.target tailscaled.service
+Wants=network-online.target tailscaled.service
+
+[Service]
+Type=notify
+User=%i
+Group=%i
+WorkingDirectory=/home/%i/mesh
+Environment=MESH_COOKIE=%{MESH_COOKIE}
+Environment=MESH_NAME=mesh@%{TAILSCALE_IP}
+Environment=TAILSCALE_IP=%{TAILSCALE_IP}
+Environment=MESH_DATA_DIR=/home/%i/.local/share/mesh
+Environment=MESH_LOG_DIR=/home/%i/.local/share/mesh/logs
+Environment=ERL_EPMD_ADDRESS=%{TAILSCALE_IP}
+ExecStart=/home/%i/mesh/start_mesh.sh
+ExecReload=/home/%i/mesh/_build/prod/rel/mesh/bin/mesh restart
+ExecStop=/home/%i/mesh/_build/prod/rel/mesh/bin/mesh stop
+Restart=on-failure
+RestartSec=10
+LimitNOFILE=65536
+LimitNPROC=32768
+
+# Security
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/home/%i/.local/share/mesh /home/%i/mesh/_build
+
+[Install]
+WantedBy=multi-user.target
