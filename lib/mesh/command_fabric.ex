@@ -84,7 +84,53 @@ defmodule Mesh.CommandFabric do
     e -> {:error, {:exception, __MODULE__, e}}
   end
 
-  defp normalize_command(command) when is_atom(command) do
+  @doc """
+  Normalize + hard-gate. opts: `:actor` (`:operator` | `:agent`), `:host`.
+  Off-allowlist verbs only proceed for an operator under an active scoped bypass.
+  """
+  def authorize(command, opts \\ []) do
+    actor = Keyword.get(opts, :actor, :agent)
+    host = Keyword.get(opts, :host, Mesh.HardGate.hostname())
+
+    case do_normalize(command) do
+      {:ok, cmd} ->
+        Mesh.HardGate.record_decision(:allow, %{
+          command: to_string(cmd),
+          actor: to_string(actor),
+          host: host,
+          bypass: "false"
+        })
+
+        {:ok, cmd}
+
+      {:error, {:not_allowlisted, cmd}} = err ->
+        if Mesh.HardGate.bypass_covers?(actor, cmd, host) do
+          atom = coerce_command_atom(cmd)
+
+          Mesh.HardGate.record_decision(:bypass, %{
+            command: to_string(cmd),
+            actor: "operator",
+            host: host,
+            bypass: "operator"
+          })
+
+          {:ok, atom}
+        else
+          Mesh.HardGate.record_decision(:deny, %{
+            command: to_string(cmd),
+            actor: to_string(actor),
+            host: host,
+            reason: "not_allowlisted"
+          })
+
+          err
+        end
+    end
+  end
+
+  defp normalize_command(command), do: authorize(command, [])
+
+  defp do_normalize(command) when is_atom(command) do
     if command in @allowed_commands do
       {:ok, command}
     else
@@ -92,7 +138,7 @@ defmodule Mesh.CommandFabric do
     end
   end
 
-  defp normalize_command(command) when is_binary(command) do
+  defp do_normalize(command) when is_binary(command) do
     allowed = Enum.map(@allowed_commands, &Atom.to_string/1)
 
     if command in allowed do
@@ -102,7 +148,15 @@ defmodule Mesh.CommandFabric do
     end
   end
 
-  defp normalize_command(command), do: {:error, {:not_allowlisted, command}}
+  defp do_normalize(command), do: {:error, {:not_allowlisted, command}}
+
+  defp coerce_command_atom(cmd) when is_atom(cmd), do: cmd
+
+  defp coerce_command_atom(cmd) when is_binary(cmd) do
+    String.to_existing_atom(cmd)
+  rescue
+    ArgumentError -> String.to_atom(cmd)
+  end
 
   # ============ Built-in Commands ============
 

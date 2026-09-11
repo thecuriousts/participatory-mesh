@@ -17,6 +17,10 @@ Arbitrary shell stays off the allowlist.
 
 Pair with [ensembly](https://github.com/thecuriousts/ensembly) when you want durable **done / pending / denied** above CommandFabric: a bot or harness can **authorize and claim** on one node, then **dispatch** an allowlisted act onto another participant. See [docs/architecture.md](docs/architecture.md).
 
+## Hard gate
+
+Deny-by-default CommandFabric allowlist with **audit always** and an **operator-only TTL bypass**. Agents cannot turn the gate off. See [Operator surface](docs/operator-surface.md#hard-gate-p3-v0).
+
 ## Docs
 
 | Doc | Contents |

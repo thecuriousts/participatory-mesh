@@ -117,10 +117,12 @@ defmodule Mesh.WebServer do
 
       _ =
         Mesh.Audit.record(%{
+          "event" => "http_command",
           "command" => command,
           "target" => target,
           "peer" => peer(conn),
-          "denied" => match?({:error, {:not_allowlisted, _}}, result)
+          "denied" => match?({:error, {:not_allowlisted, _}}, result),
+          "actor" => "agent"
         })
 
       case result do

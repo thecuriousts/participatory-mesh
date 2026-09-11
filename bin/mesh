@@ -18,12 +18,18 @@ mesh — gate CLI (your machines, allowlisted commands, no SSH)
   mesh status               GET /health on every node
   mesh cmd <command>        POST /command (Bearer token)
   mesh cmd <command> --node <ip>
+  mesh gate status          hard-gate view (always ON; bypass window if any)
+  mesh gate bypass --for 30m [--hosts h] [--verbs v] [--reason tinker]
+  mesh gate bypass --off    end operator bypass early
 
 Commands the kernel allows: health_check, tailscale_status, help,
 restart_service (only names in ~/.config/mesh/allowed_services).
-shell is always 403.
+shell is always 403 unless operator bypass scopes it.
 
-Env: MESH_API_TOKEN, MESH_NODES (comma IPs), MESH_WEB_PORT, MESH_CONFIG_DIR
+Agents cannot disable the gate. Permanent off does not exist — only TTL bypass.
+
+Env: MESH_API_TOKEN, MESH_NODES (comma IPs), MESH_WEB_PORT, MESH_CONFIG_DIR,
+     MESH_OPERATOR=1 (required for bypass), MESH_GATE_STATE, MESH_AUDIT_LOG
 EOF
 }
 
@@ -152,11 +158,83 @@ cmd_cmd() {
   done <<< "$ips"
 }
 
+
+parse_duration_ms() {
+  # 30m | 1h | 90s | bare seconds
+  local raw="$1"
+  if [[ "$raw" =~ ^([0-9]+)ms$ ]]; then echo "${BASH_REMATCH[1]}"; return; fi
+  if [[ "$raw" =~ ^([0-9]+)s$ ]]; then echo $(( ${BASH_REMATCH[1]} * 1000 )); return; fi
+  if [[ "$raw" =~ ^([0-9]+)m$ ]]; then echo $(( ${BASH_REMATCH[1]} * 60 * 1000 )); return; fi
+  if [[ "$raw" =~ ^([0-9]+)h$ ]]; then echo $(( ${BASH_REMATCH[1]} * 3600 * 1000 )); return; fi
+  if [[ "$raw" =~ ^[0-9]+$ ]]; then echo $(( raw * 1000 )); return; fi
+  echo "bad duration: $raw (use 30m / 1h / 90s)" >&2
+  exit 1
+}
+
+cmd_gate() {
+  local sub="${1:-status}"
+  shift || true
+  local root
+  root="$(cd "$(dirname "$0")/.." && pwd)"
+  case "$sub" in
+    status)
+      (cd "$root" && mix run -e 'IO.inspect(Mesh.HardGate.status(), structs: false)')
+      ;;
+    bypass)
+      if [[ "${MESH_OPERATOR:-}" != "1" ]]; then
+        echo "operator only: set MESH_OPERATOR=1 (agents cannot bypass)" >&2
+        exit 1
+      fi
+      local off=0 for_raw="" hosts="" verbs="" reason="tinker"
+      while [[ $# -gt 0 ]]; do
+        case "$1" in
+          --off) off=1; shift ;;
+          --for) for_raw="$2"; shift 2 ;;
+          --hosts) hosts="$2"; shift 2 ;;
+          --verbs) verbs="$2"; shift 2 ;;
+          --reason) reason="$2"; shift 2 ;;
+          *) echo "unknown bypass flag $1" >&2; exit 1 ;;
+        esac
+      done
+      if [[ "$off" == "1" ]]; then
+        (cd "$root" && mix run -e 'case Mesh.HardGate.end_bypass(actor: :operator) do :ok -> IO.puts("bypass off"); {:error, r} -> IO.puts(:stderr, inspect(r)); System.halt(1) end')
+        return
+      fi
+      if [[ -z "$for_raw" ]]; then
+        echo "mesh gate bypass --for 30m [--hosts a,b] [--verbs shell] [--reason tinker]" >&2
+        exit 1
+      fi
+      local ttl hosts_elixir verbs_elixir
+      ttl="$(parse_duration_ms "$for_raw")"
+      hosts_elixir="$(python3 -c "import os; h=os.environ.get('H',''); print('['+','.join(['\"%s\"'%x for x in h.split(',') if x])+']')" H="$hosts")"
+      verbs_elixir="$(python3 -c "import os; h=os.environ.get('V',''); print('['+','.join(['\"%s\"'%x for x in h.split(',') if x])+']')" V="$verbs")"
+      (cd "$root" && TTL="$ttl" HOSTS="$hosts_elixir" VERBS="$verbs_elixir" REASON="$reason" mix run -e '
+ttl = String.to_integer(System.fetch_env!("TTL"))
+hosts = Code.eval_string(System.fetch_env!("HOSTS")) |> elem(0)
+verbs = Code.eval_string(System.fetch_env!("VERBS")) |> elem(0)
+reason = System.fetch_env!("REASON")
+case Mesh.HardGate.start_bypass(actor: :operator, ttl_ms: ttl, hosts: hosts, verbs: verbs, reason: reason) do
+  {:ok, b} -> IO.inspect(b, label: "bypass")
+  {:error, r} -> IO.puts(:stderr, inspect(r)); System.halt(1)
+end
+')
+      ;;
+    *)
+      echo "mesh gate status | bypass ..." >&2
+      exit 1
+      ;;
+  esac
+}
+
 main() {
   case "${1:-}" in
     ""|-h|--help|help) usage ;;
     init) cmd_init ;;
     status) cmd_status ;;
+    gate)
+      shift
+      cmd_gate "$@"
+      ;;
     cmd)
       shift
       if [[ $# -lt 1 ]]; then

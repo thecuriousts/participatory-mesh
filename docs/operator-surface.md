@@ -51,3 +51,17 @@ Mesh.ConfigStore.put("syncthing/folders", %{
 
 Mesh.ConfigStore.get("syncthing/folders")
 ```
+
+## Hard gate (P3 v0)
+
+Default **ON**. Cross-host mutate verbs stay on the CommandFabric allowlist. Every allow / deny / bypass decision appends to `MESH_AUDIT_LOG` (default `~/.local/share/mesh/audit.jsonl`).
+
+| CLI | Effect |
+|-----|--------|
+| `mesh gate status` | Gate ON + any active operator bypass window |
+| `MESH_OPERATOR=1 mesh gate bypass --for 30m --hosts mzapan --verbs shell --reason tinker` | Operator-only TTL bypass (scoped) |
+| `MESH_OPERATOR=1 mesh gate bypass --off` | End bypass early |
+
+Agents cannot disable the gate. There is no permanent “gate off” — only timed bypass. Actions under bypass are audited with `bypass=operator`.
+
+Law: ensembly-everywhere `MESH-HARD-GATE.md` / `P3-MESH-SLICE.md`.
