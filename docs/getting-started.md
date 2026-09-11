@@ -46,6 +46,8 @@ Mesh.CommandFabric.broadcast(:health_check)
 
 Dashboard (when enabled): `http://<node-private-ip>:47989`
 
+Multi-node over Tailscale but stuck at **quorum 1/1**? See [Cluster troubleshooting](cluster-troubleshooting.md) (longname, cookie, Shields Up, ufw, live `Node.connect`).
+
 ## Lab env
 
 Copy `.env.lab.example` → `.env.lab` for local hostnames and IDs. That file is gitignored.

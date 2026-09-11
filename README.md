@@ -19,13 +19,14 @@ Pair with [ensembly](https://github.com/thecuriousts/ensembly) when you want dur
 
 ## Hard allow
 
-Deny-by-default CommandFabric allowlist with **audit always** and an **operator-only TTL bypass**. Agents cannot turn the gate off. See [Operator surface](docs/operator-surface.md#hard-allow-p3-v0).
+Deny-by-default CommandFabric allowlist with **audit always** and an **operator-only TTL bypass**. Agents cannot disable HardAllow. See [Operator surface](docs/operator-surface.md#hard-allow-p3-v0).
 
 ## Docs
 
 | Doc | Contents |
 |-----|----------|
 | [Getting started](docs/getting-started.md) | Build, cookie, start, verify |
+| [Cluster troubleshooting](docs/cluster-troubleshooting.md) | Two-node Tailscale quorum, 1/1 diagnosis |
 | [Architecture overview](docs/architecture.md) | Components and trust boundary |
 | [Operator surface](docs/operator-surface.md) | Allowlisted commands, HTTP API, systemd |
 
