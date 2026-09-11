@@ -26,7 +26,7 @@ Deny-by-default CommandFabric allowlist with **audit always** and an **operator-
 | Doc | Contents |
 |-----|----------|
 | [Getting started](docs/getting-started.md) | Build, cookie, start, verify |
-| [Architecture overview](docs/architecture.md) | Components and trust boundary |
+| [Architecture overview](docs/architecture.md) | Components, trust boundary, fleet topology overview |
 | [Operator surface](docs/operator-surface.md) | Allowlisted commands, HTTP API, systemd |
 
 Hostnames, Tailscale IPs, and device IDs stay out of git — use a local `.env.lab` from `.env.lab.example`.
