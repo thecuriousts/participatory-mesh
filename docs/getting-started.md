@@ -46,6 +46,8 @@ Mesh.CommandFabric.broadcast(:health_check)
 
 Dashboard (when enabled): `http://<node-private-ip>:47989`
 
+If both nodes answer `/health` but quorum stays **1/1**, see [Cluster troubleshooting](cluster-troubleshooting.md).
+
 ## Lab env
 
 Copy `.env.lab.example` → `.env.lab` for local hostnames and IDs. That file is gitignored.

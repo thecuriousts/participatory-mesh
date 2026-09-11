@@ -54,4 +54,13 @@ An operator kernel ([ensembly](https://github.com/thecuriousts/ensembly)) can **
 
 Ensembly owns whether the act is owed. Mesh owns that only allowlisted verbs run across the Tailscale cluster. Syncthing, Sunshine, and VNC are optional host tools — they do not decide what bots may run.
 
-Operator-specific pairing diagrams stay out of this public dump.
+## Fleet topology (2026-09)
+
+Two-node fleet slice (**linux-node** + **mac-node**) over Tailscale: mesh OTP cluster, ensembly import on mac-node, ensemble-ops-writer as ensembly ops writer, RustDesk for headless HITL. Public docs describe **roles and ports only** — operator-specific pairing (Tailscale IPs, `.local` hostnames, device IDs) stays in local [`.env.lab`](../.env.lab.example) and `~/.config/mesh/nodes`, not in git.
+
+| Doc | Contents |
+|-----|----------|
+| [Fleet bring-up log (2026-09-12)](fleet/2026-09-12-mini-linux-node-bringup.md) | Day log, fixes (longnames, ShieldsUp, ufw, dist ports), verification |
+| [Fleet architecture](fleet/architecture-fleet-mesh-ensembly.md) | Mermaid topology: mesh cluster, ensembly import, HOOTL/HITL |
+
+Generic build/start remains in [getting-started.md](getting-started.md). Cookies and tokens stay under `~/.config/mesh/` — never committed.
